@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import requests
-from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, DBName, user_prompt, summary
+from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
 from mw_api_client import Wiki
 from openai import OpenAI
 import sys
@@ -112,7 +112,7 @@ def deepseek_generate(label, claims, description, temp: float) -> str:
     response = client.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data without adding any information based on external knowledge or assumptions even if you know them from elsewhere."},
+            {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. Do not try to use templates or categorise any page." + custom_sys_prompt()},
             {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
         ],
         stream=False,
@@ -142,3 +142,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
