@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import requests
-from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, DBName, user_prompt
+from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, DBName, user_prompt, summary
 from mw_api_client import Wiki
 from openai import OpenAI
 import sys
@@ -107,7 +107,7 @@ def make_claims_readable(claims_dict: dict) -> dict:
             readable[readable_prop].append(val_label)
     return readable
 
-def deepseek_generate(label, claims, description, temp: float):
+def deepseek_generate(label, claims, description, temp: float) -> str:
     """Generate article content with DeepSeek-v3"""
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -138,7 +138,7 @@ def main():
         else:
             claims, label, description = data
             article = deepseek_generate(label, str(claims), description, temperature)
-            wiki.page(prefix + label).edit(article, f'Bot: Making an article based on data from Snap! Data item {item}', createonly=True)
+            wiki.page(prefix + label).edit(article, summary(item), createonly=True)
 
 if __name__ == "__main__":
     main()
