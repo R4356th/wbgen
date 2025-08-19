@@ -107,7 +107,7 @@ def make_claims_readable(claims_dict: dict) -> dict:
             readable[readable_prop].append(val_label)
     return readable
 
-def deepseek_generate(label, claims, description):
+def deepseek_generate(label, claims, description, temp: float):
     """Generate article content with DeepSeek-v3"""
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -115,14 +115,19 @@ def deepseek_generate(label, claims, description):
             {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data without adding any information based on external knowledge or assumptions even if you know them from elsewhere."},
             {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
         ],
-        stream=False
+        stream=False,
+        temperature=temp
     )
     return response.choices[0].message.content
 
 def main():
     prefix = ""
-    if sys.argv[1]:
-        prefix = sys.argv[1]
+    temperature=0.7
+    arg = sys.argv
+    if arg[1]:
+        prefix = arg[1]
+    if arg[2]:
+        temperature = float(arg[2])
     for page in repo.allpages():
         if not page.title.startswith("Q"):
             continue
@@ -132,7 +137,7 @@ def main():
             print(f"Skipping {item} because it has no claim")
         else:
             claims, label, description = data
-            article = deepseek_generate(label, str(claims), description)
+            article = deepseek_generate(label, str(claims), description, temperature)
             wiki.page(prefix + label).edit(article, f'Bot: Making an article based on data from Snap! Data item {item}', createonly=True)
 
 if __name__ == "__main__":
