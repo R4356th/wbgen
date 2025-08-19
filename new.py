@@ -8,19 +8,22 @@ from openai import OpenAI
 
 wiki = Wiki(API_URL, USERAGENT)
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+headers = {
+    'User-Agent': USERAGENT
+}
+common_params = {
+    'redirects': 'yes',
+    'format': 'json'
+}
 
 def get_data_for_item(item_id: str):
     """Fetch label and descripton for a Wikibase item"""
     params = {
         'action': 'wbgetentities',
         'ids': item_id,
-        'props': 'labels|claims|descriptions', # We do not want aliases as they are usually less useful for the main wiki.
-        'redirects': 'yes',
-        'format': 'json'
+        'props': 'labels|claims|descriptions' # We do not want aliases as they are usually less useful for the main wiki.
     }
-    headers = {
-        'User-Agent': USERAGENT
-    }
+    params.update(common_params)
     response = requests.get(API_URL, params=params, headers=headers)
     data = response.json()
     if not has_sitelinks(item_id):
@@ -32,7 +35,7 @@ def get_data_for_item(item_id: str):
         try:
             claims = item.get('claims')
         except AttributeError:
-            claims = {}
+            return 'Unsuitable' # If an item has no claim, we cannot write any meaningful or meaningfully contentful article with it.
         try:
             description = data.get('entities').get(item_id).get('descriptions').get('en').get('value')
         except AttributeError:
@@ -45,13 +48,9 @@ def has_sitelinks(item_id: str) -> bool:
     params = {
         'action': 'wbgetentities',
         'ids': item_id,
-        'props': 'labels|aliases|claims|descriptions',
-        'redirects': 'yes',
-        'format': 'json'
+        'props': 'labels|aliases|claims|descriptions'
     }
-    headers = {
-        'User-Agent': USERAGENT
-    }
+    params.update(common_params)
     response = requests.get(API_URL, params=params, headers=headers)
     data = response.json()
     try:
@@ -71,9 +70,6 @@ def get_labels(ids: list):
         'props': 'labels',
         'languages': 'en',
         'format': 'json'
-    }
-    headers = {
-        'User-Agent': USERAGENT
     }
     response = requests.get(API_URL, params=params, headers=headers)
     labels = {}
@@ -115,7 +111,7 @@ def deepseek_generate(label, claims, description):
         model="deepseek-chat",
         messages=[
             {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data without adding any information based on external knowledge or assumptions even if you know them from elsewhere."},
-            {"role": "user", "content": user_prompt(label, description, claims)},
+            {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
         ],
         stream=False
     )
@@ -126,12 +122,13 @@ def main():
         if not page.title.startswith("Q"):
             continue
         item = page.title
-
-        claims, label, description = get_data_for_item(item)
-        #article = deepseek_generate(label, str(claims), description)
-       # print(article)
-
-        time.sleep(1)
+        data = get_data_for_item(item)
+        if data == 'Unsuitable':
+            print(f'Skipping {item} because it has no claim')
+        else:
+            claims, label, description = data
+            article = deepseek_generate(label, str(claims), description)
+            print(article)
 
 if __name__ == "__main__":
     main()
