@@ -7,7 +7,7 @@ from openai import OpenAI
 from itertools import islice
 from argparse import ArgumentParser
 from sys import maxsize
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 repo = Wiki(REPO_API_URL, USERAGENT)
 wiki = Wiki(WIKI_API_URL, USERAGENT)
 wiki.clientlogin(USERNAME, PASSWORD)
@@ -19,11 +19,17 @@ common_params = {
     "format": "json"
 }
 
-def message(label, description, claims):
+def messages(label, description, claims):
     return [
-            {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. Do not try to use templates or categorise any page." + custom_sys_prompt()},
-            {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
-        ]
+        {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on "
+        "given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even "
+        "if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you "
+        "followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, "
+        "put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references "
+        "or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. "
+        "Do not try to use templates or categorise any page. " + custom_sys_prompt()},
+        {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
+    ]
 
 def get_data_for_item(item_id: str):
     """Fetch label and descripton for a Wikibase item"""
@@ -113,24 +119,17 @@ def make_claims_readable(claims_dict: dict) -> dict:
                 val_label = dv.get("value", "")
             readable[readable_prop].append(val_label)
     return readable
-
-def deepseek_generate(label, claims, description, temp: float) -> str:
-    """Generate article content with the latest non-reasoning LLM from DeepSeek"""
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=message(label, description, claims),
-        stream=False,
-        temperature=temp
-    )
-    return response.choices[0].message.content
-
-def openrouter_generate(model: str, label, claims, description, temp: float) -> str:
-    """Generate article content with a model from OpenRouter"""
-    client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+    
+def generate(model: str, label, claims, description, temp: float) -> str:
+    """Generate article content with an LLM from the official DeepSeek API or from OpenRouter"""
+    if model == 'ds':
+        client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+        model="deepseek-chat" # This is the latest non-reasoning LLM from DeepSeek
+    else:
+        client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
     response = client.chat.completions.create(
         model=model,
-        messages=message(label, description, claims),
+        messages=messages(label, description, claims),
         stream=False,
         temperature=temp
     )
@@ -166,9 +165,9 @@ def main():
             else:
                 claims, label, description = data
                 if args.model == 'ds':
-                    article = deepseek_generate(label, str(claims), description, args.temperature)
+                    article = generate(args.model, label, str(claims), description, args.temperature)
                 else:
-                    article = openrouter_generate(args.model, label, str(claims), description, args.temperature)
+                    article = generate(args.model, label, str(claims), description, args.temperature)
                 # @TODO: Strip the first section header if it is the same as the title of the article
                 wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
             processed.write(label + '\n') # Save the file on each iteration to allow abruptly exiting the process
