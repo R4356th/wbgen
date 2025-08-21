@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import requests
-from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
+from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
 from mw_api_client import Wiki
 from openai import OpenAI
 import sys
@@ -9,7 +9,6 @@ import sys
 repo = Wiki(REPO_API_URL, USERAGENT)
 wiki = Wiki(WIKI_API_URL, USERAGENT)
 wiki.clientlogin(USERNAME, PASSWORD)
-client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 headers = {
     "User-Agent": USERAGENT
 }
@@ -17,6 +16,12 @@ common_params = {
     "redirects": "yes",
     "format": "json"
 }
+
+def message(label, description, claims):
+    return [
+            {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. Do not try to use templates or categorise any page." + custom_sys_prompt()},
+            {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
+        ]
 
 def get_data_for_item(item_id: str):
     """Fetch label and descripton for a Wikibase item"""
@@ -108,13 +113,22 @@ def make_claims_readable(claims_dict: dict) -> dict:
     return readable
 
 def deepseek_generate(label, claims, description, temp: float) -> str:
-    """Generate article content with DeepSeek-v3"""
+    """Generate article content with the latest non-reasoning LLM from DeepSeek"""
+    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
     response = client.chat.completions.create(
         model="deepseek-chat",
-        messages=[
-            {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. Do not try to use templates or categorise any page." + custom_sys_prompt()},
-            {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
-        ],
+        messages=message(label, description, claims),
+        stream=False,
+        temperature=temp
+    )
+    return response.choices[0].message.content
+
+def openrouter_generate(model: str, label, claims, description, temp: float) -> str:
+    """Generate article content with a model from OpenRouter"""
+    client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+    response = client.chat.completions.create(
+        model=model,
+        messages=message(label, description, claims),
         stream=False,
         temperature=temp
     )
@@ -128,6 +142,10 @@ def main():
         prefix = arg[1]
     if arg[2]:
         temperature = float(arg[2])
+    if arg[3] == 'ds':
+        model = 'ds'
+    else:
+        model = arg[3]
     for page in repo.allpages():
         if not page.title.startswith("Q"):
             continue
@@ -137,9 +155,11 @@ def main():
             print(f"Skipping {item} because it has no claim")
         else:
             claims, label, description = data
-            article = deepseek_generate(label, str(claims), description, temperature)
+            if model == 'ds':
+                article = deepseek_generate(label, str(claims), description, temperature)
+            else:
+                article = openrouter_generate(model, label, str(claims), description, temperature)
             wiki.page(prefix + label).edit(article, summary(item), createonly=True)
 
 if __name__ == "__main__":
     main()
-
