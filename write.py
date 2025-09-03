@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from requests import get
 from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
-from mw_api_client import Wiki, excs
+from mw_api_client import Wiki, excs, WikiError
 from openai import OpenAI
 from itertools import islice
 from argparse import ArgumentParser
@@ -18,6 +18,9 @@ common_params = {
     "redirects": "yes",
     "format": "json"
 }
+
+if wiki.meta.csrftoken == '+\\':
+    raise WikiError('Log in failed. Please check your credentials.')
 
 def messages(label, description, claims):
     return [
@@ -180,6 +183,6 @@ def main():
                     print("Skipping" + label + "because it has been created in the meantime. Please check if it is yet to be connected to the Wikibase wiki." )
             processed.write(item + '\n') # Save the file on each iteration to allow abruptly exiting the process
             
-
+#@TODO: Implement batching of requests to save money
 if __name__ == "__main__":
     main()
