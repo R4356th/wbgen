@@ -182,7 +182,7 @@ def main():
                 except excs.articleexists:
                     print("Skipping" + label + "because it has been created in the meantime. Please check if it is yet to be connected to the Wikibase wiki." )
             processed.write(item + '\n') # Save the file on each iteration to allow abruptly exiting the process
-            
-#@TODO: Implement batching of requests to save money
+
+#@TODO: Allow batching items together to cut down on token usage
 if __name__ == "__main__":
     main()
