@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from requests import get
-from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
+from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, CUSTOM_API_KEY, CUSTOM_API_URL, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
 from mw_api_client import Wiki, excs, WikiError
 from openai import OpenAI
 from itertools import islice
@@ -126,6 +126,9 @@ def generate(model: str, label, claims, description, temp: float) -> str:
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         model="deepseek-chat" # This is the latest non-reasoning LLM from DeepSeek
         extra_headers = {}
+    elif model=='custom':
+        client = OpenAI(api_key=CUSTOM_API_KEY, base_url=CUSTOM_API_URL)
+        extra_headers={}
     else:
         client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
         extra_headers = {
@@ -146,7 +149,7 @@ def main():
     parser.add_argument("--prefix", default="", help="Article title prefix")
     parser.add_argument("--temperature", type=float, default=0.5, help="Model temperature (default: 0.5)")
     parser.add_argument("--ns", type=int, default=0, help="ID of the namespace where the Wikibase items are stored (default: 0)")
-    parser.add_argument("--model", default="ds", help="Model: 'ds' for DeepSeek's non-reasoning model, otherwise OpenRouter model ID")
+    parser.add_argument("--model", default="ds", help="Model: 'ds' for DeepSeek's non-reasoning model, 'custom' for something other than DeepSeek and OpenRouter (e.g. Ollama, llama.cpp), otherwise OpenRouter model ID")
     parser.add_argument("--begin", default="", help="Wikitext that should be added to the start of the page (default: nothing)")
     parser.add_argument("--count", type=int, default=maxsize, help="Number of pages to process (default: unlimited)")
     args = parser.parse_args()
