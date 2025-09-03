@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import requests
+from requests import get
 from config import USERAGENT, WIKI_API_URL, REPO_API_URL, USERNAME, PASSWORD, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, DBName, custom_sys_prompt, user_prompt, summary
-from mw_api_client import Wiki
+from mw_api_client import Wiki, excs
 from openai import OpenAI
 from itertools import islice
 from argparse import ArgumentParser
 from sys import maxsize
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# @TODO: Implement concurrency: from concurrent.futures import ThreadPoolExecutor, as_completed
 repo = Wiki(REPO_API_URL, USERAGENT)
 wiki = Wiki(WIKI_API_URL, USERAGENT)
-wiki.clientlogin(USERNAME, PASSWORD)
+wiki.login(USERNAME, PASSWORD)
 headers = {
     "User-Agent": USERAGENT
 }
@@ -24,10 +24,10 @@ def messages(label, description, claims):
         {"role": "system", "content": "You are an expert wiki editor. You write encyclopedic articles in proper English based on "
         "given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even "
         "if you know them from elsewhere. Do not include anything irrelevant such as comments about what you did or the process you "
-        "followed, lack of data about the given topic or something related to it. Refrain from using too many bullet points; instead, "
-        "put what you would like to put in bullet points as complete sentences as is the convention on wikis. Do not include references "
-        "or anything that seems irrelevant to the specified topic because what you write will be pasted verbatim to make a new article. "
-        "Do not try to use templates or categorise any page. " + custom_sys_prompt()},
+        "followed, lack of data about the given topic or something related to it; you should only ever write the article itself. Refrain "
+        "from using too many bullet points; instead, put what you would like to put in bullet points as complete sentences as is the "
+        "convention on wikis. Do not include references or anything that seems irrelevant to the specified topic because what you write will"
+        " be pasted verbatim to make a new article. " + "Do not try to use templates or categorise any page. " + custom_sys_prompt()},
         {"role": "user", "content": user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
     ]
 
@@ -39,7 +39,7 @@ def get_data_for_item(item_id: str):
         "props": "labels|claims|descriptions" # We do not want aliases as they are usually less useful for the main wiki.
     }
     params.update(common_params)
-    response = requests.get(REPO_API_URL, params=params, headers=headers)
+    response = get(REPO_API_URL, params=params, headers=headers)
     data = response.json()
     if not has_sitelinks(item_id):
         item = data.get("entities").get(item_id)
@@ -63,16 +63,13 @@ def has_sitelinks(item_id: str) -> bool:
     params = {
         "action": "wbgetentities",
         "ids": item_id,
-        "props": "labels|aliases|claims|descriptions"
+        "props": "sitelinks"
     }
     params.update(common_params)
-    response = requests.get(REPO_API_URL, params=params, headers=headers)
+    response = get(REPO_API_URL, params=params, headers=headers)
     data = response.json()
-    try:
-        data.get("entities").get(item_id).get("sitelinks").get(DBName)
-        return True
-    except AttributeError:
-        return False
+    sitelinks = data.get("entities", {}).get(item_id, {}).get("sitelinks", {})
+    return DBName in sitelinks
     
 def get_labels(ids: list):
     """Fetch English labels for a list of item or property IDs."""
@@ -86,7 +83,7 @@ def get_labels(ids: list):
         "languages": "en",
         "format": "json"
     }
-    response = requests.get(REPO_API_URL, params=params, headers=headers)
+    response = get(REPO_API_URL, params=params, headers=headers)
     labels = {}
     for eid, data in response.json().get("entities", {}).items():
         lbl = data.get("labels", {}).get("en", {}).get("value")
@@ -125,13 +122,19 @@ def generate(model: str, label, claims, description, temp: float) -> str:
     if model == 'ds':
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         model="deepseek-chat" # This is the latest non-reasoning LLM from DeepSeek
+        extra_headers = {}
     else:
         client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+        extra_headers = {
+            'HTTP-Referer': 'https://github.com/R4356th/wbgen',
+            'X-Title': 'WBGen'
+        }
     response = client.chat.completions.create(
         model=model,
         messages=messages(label, description, claims),
         stream=False,
-        temperature=temp
+        temperature=temp,
+        extra_headers=extra_headers
     )
     return response.choices[0].message.content
 
@@ -163,7 +166,7 @@ def main():
             data = get_data_for_item(item)
             if data == "Unsuitable":
                 print(f"Skipping {item} because it has no claim")
-            else:
+            elif data is not None:
                 claims, label, description = data
                 article = args.begin
                 if args.model == 'ds':
@@ -171,8 +174,11 @@ def main():
                 else:
                     article = article + generate(args.model, label, str(claims), description, args.temperature)
                 # @TODO: Strip the first section header if it is the same as the title of the article
-                wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
-            processed.write(label + '\n') # Save the file on each iteration to allow abruptly exiting the process
+                try:
+                    wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
+                except excs.articleexists:
+                    print("Skipping" + label + "because it has been created in the meantime. Please check if it is yet to be connected to the Wikibase wiki." )
+            processed.write(item + '\n') # Save the file on each iteration to allow abruptly exiting the process
             
 
 if __name__ == "__main__":
