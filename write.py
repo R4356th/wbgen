@@ -138,9 +138,10 @@ def generate(model: str, label, claims, description, temp: float) -> str:
 def main():
     parser = ArgumentParser(prog='wbgen', description='A bot that automatically makes new wiki articles based on structured data found in a Wikibase repository')
     parser.add_argument("--prefix", default="", help="Article title prefix")
-    parser.add_argument("--temperature", type=float, default=0.5, help="Model temperature")
+    parser.add_argument("--temperature", type=float, default=0.5, help="Model temperature (default: 0.5)")
     parser.add_argument("--ns", type=int, default=0, help="ID of the namespace where the Wikibase items are stored (default: 0)")
     parser.add_argument("--model", default="ds", help="Model: 'ds' for DeepSeek's non-reasoning model, otherwise OpenRouter model ID")
+    parser.add_argument("--begin", default="", help="Wikitext that should be added to the start of the page (default: nothing)")
     parser.add_argument("--count", type=int, default=maxsize, help="Number of pages to process (default: unlimited)")
     args = parser.parse_args()
 
@@ -164,10 +165,11 @@ def main():
                 print(f"Skipping {item} because it has no claim")
             else:
                 claims, label, description = data
+                article = args.begin
                 if args.model == 'ds':
-                    article = generate(args.model, label, str(claims), description, args.temperature)
+                    article = article + generate(args.model, label, str(claims), description, args.temperature)
                 else:
-                    article = generate(args.model, label, str(claims), description, args.temperature)
+                    article = article + generate(args.model, label, str(claims), description, args.temperature)
                 # @TODO: Strip the first section header if it is the same as the title of the article
                 wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
             processed.write(label + '\n') # Save the file on each iteration to allow abruptly exiting the process
