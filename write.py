@@ -174,14 +174,14 @@ def main():
                 print(f"Skipping {item} because it has no claim")
             elif data is not None:
                 claims, label, description = data
-                article = args.begin
+                article = args.begin + '\n'
                 if args.model == 'ds':
                     article = article + generate(args.model, label, str(claims), description, args.temperature)
                 else:
                     article = article + generate(args.model, label, str(claims), description, args.temperature)
                 # @TODO: Strip the first section header if it is the same as the title of the article
                 try:
-                    wiki.page(args.prefix + '\n' + label).edit(article, summary(item), createonly=True)
+                    wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
                 except excs.articleexists:
                     print("Skipping" + label + "because it has been created in the meantime. Please check if it is yet to be connected to the Wikibase wiki." )
             processed.write(item + '\n') # Save the file on each iteration to allow abruptly exiting the process
@@ -189,4 +189,5 @@ def main():
 #@TODO: Allow batching items together to cut down on token usage
 if __name__ == "__main__":
     main()
+
 
