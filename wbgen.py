@@ -175,7 +175,7 @@ def main():
                 print(f'Skipping {item} because it has no claim')
             elif data is not None:
                 claims, label, description = data
-                article = args.begin
+                article = args.begin = '\n'
                 article = article + generate(args.model, label, str(claims), description, args.temperature)
                 try:
                     wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
@@ -185,3 +185,5 @@ def main():
 #@TODO: Allow batching items together to cut down on token usage
 if __name__ == '__main__':
     main()
+
+
