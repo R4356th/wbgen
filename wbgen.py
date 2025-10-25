@@ -159,7 +159,7 @@ def process_item(item, args, processed):
             return
         claims, label, description = data
         article = args.begin + '\n' 
-        artcle = article + generate(args.model, label, str(claims), description, args.temperature)
+        article = article + generate(args.model, label, str(claims), description, args.temperature)
         wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
         processed.write(item + '\n')
         processed.flush()
