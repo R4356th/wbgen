@@ -37,7 +37,7 @@ def messages(label, description, claims) -> list:
         {'role': 'user', 'content': user_prompt(label, description, claims)}, # user_prompt() is the function that generates the user prompt
     ]
 
-def get_data_for_item(item_id: str):
+def get_data_for_item(item_id: str) -> tuple | None:
     '''Fetch label and descripton for a Wikibase item'''
     params = {
         'action': 'wbgetentities',
@@ -79,7 +79,7 @@ def has_sitelinks(item_id: str) -> bool:
     sitelinks = data.get('entities', {}).get(item_id, {}).get('sitelinks', {})
     return DBName in sitelinks
 
-def get_labels(ids: list):
+def get_labels(ids: list) -> dict:
     '''Fetch English labels for a list of item or property IDs.'''
     if not ids:
         return {}
@@ -150,6 +150,7 @@ def generate(model: str, label, claims, description, temp: float) -> str:
     return response.choices[0].message.content
 
 def process_item(item, args, processed):
+    '''Create the article'''
     try:
         data = get_data_for_item(item)
         if data is None:
