@@ -6,8 +6,10 @@ from mw_api_client import Wiki, excs, WikiError
 from openai import OpenAI
 from itertools import islice
 from argparse import ArgumentParser
-from sys import maxsize, exit
-# @TODO: Implement concurrency: from concurrent.futures import ThreadPoolExecutor, as_completed
+from sys import maxsize
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from time import sleep
+
 repo = Wiki(REPO_API_URL, USERAGENT)
 wiki = Wiki(WIKI_API_URL, USERAGENT)
 wiki.login(USERNAME, PASSWORD)
@@ -23,7 +25,7 @@ common_params = {
 if wiki.meta.csrftoken == '+\\':
     raise WikiError('Log in failed. Please check your credentials.')
 
-def messages(label, description, claims):
+def messages(label, description, claims) -> list:
     return [
         {'role': 'system', 'content': 'You are an expert wiki editor. You write encyclopedic articles in proper English based on '
         'given JSON data in Wikitext (NOT Markdown) without adding any information based on external knowledge or assumptions even '
@@ -51,15 +53,17 @@ def get_data_for_item(item_id: str):
             label = item.get('labels').get('en').get('value')
         except AttributeError:
             print(f'{item_id} has no label!')
+            return None
         try:
             claims = item.get('claims')
         except AttributeError:
-            return 'Unsuitable' # If an item has no claim, we cannot write any meaningful or meaningfully contentful article with it.
+            return None # If an item has no claim, we cannot write any meaningful or meaningfully contentful article with it.
         try:
             description = data.get('entities').get(item_id).get('descriptions').get('en').get('value')
         except AttributeError:
             print(f'{item_id} has no description!')
             description = ''
+            return None
         return make_claims_readable(claims), label, description
 
 def has_sitelinks(item_id: str) -> bool:
@@ -74,7 +78,7 @@ def has_sitelinks(item_id: str) -> bool:
     data = response.json()
     sitelinks = data.get('entities', {}).get(item_id, {}).get('sitelinks', {})
     return DBName in sitelinks
-    
+
 def get_labels(ids: list):
     '''Fetch English labels for a list of item or property IDs.'''
     if not ids:
@@ -97,7 +101,7 @@ def get_labels(ids: list):
 def make_claims_readable(claims_dict: dict) -> dict:
     '''Replace property/item IDs inside the claims with English labels.'''
     ids = set()
-    # collect all P and Q referenced
+    # Collect all P and Q referenced
     for prop, claim_list in claims_dict.items():
         ids.add(prop)
         for claim in claim_list:
@@ -120,16 +124,16 @@ def make_claims_readable(claims_dict: dict) -> dict:
                 val_label = dv.get('value', '')
             readable[readable_prop].append(val_label)
     return readable
-    
+
 def generate(model: str, label, claims, description, temp: float) -> str:
     '''Generate article content with an LLM from the official DeepSeek API or from OpenRouter'''
     if model == 'ds':
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url='https://api.deepseek.com')
         model='deepseek-chat' # This is the non-thinking mode of the latest LLM from DeepSeek
         extra_headers = {}
-    elif model=='custom':
+    elif model == 'custom':
         client = OpenAI(api_key=CUSTOM_API_KEY, base_url=CUSTOM_API_URL)
-        extra_headers={}
+        extra_headers = {}
     else:
         client = OpenAI(api_key=OPENROUTER_API_KEY, base_url='https://openrouter.ai/api/v1')
         extra_headers = {
@@ -144,6 +148,30 @@ def generate(model: str, label, claims, description, temp: float) -> str:
         extra_headers=extra_headers
     )
     return response.choices[0].message.content
+
+def process_item(item, args, processed):
+    try:
+        data = get_data_for_item(item)
+        if data is None:
+            with open('reports/skipped.txt', 'a', encoding='utf-8') as skipped:
+                skipped.write(f'{item}\n')
+            print(f'Skipping {item}: not enough data present')
+            return
+        claims, label, description = data
+        article = args.begin + '\n' 
+        artcle = article + generate(args.model, label, str(claims), description, args.temperature)
+        wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
+        processed.write(item + '\n')
+        processed.flush()
+    except excs.articleexists:
+        print(f'Skipping {item}: already exists; you should consider adding the relevant sitelink to the item.')
+        processed.write(item + '\n')
+        processed.flush()
+    except Exception as e:
+        print(f'Error processing {item}: {e}')
+        with open('reports/errors.txt', 'a', encoding='utf-8') as errf:
+            errf.write(f'{item}: {e}\n')
+        sleep(1)  # Delay to avoid hammering APIs
 
 def main():
     parser = ArgumentParser(prog='python wbgen.py', description='A bot that automatically makes new wiki articles based on structured data found in a Wikibase repository')
@@ -161,29 +189,20 @@ def main():
     except FileNotFoundError: # This means there is no cache to fetch labels from at the moment.
         already_made = set()
 
-    pages = repo.allpages('max', args.ns)
+    pages = list(repo.allpages('max', args.ns))
     if not args.count == maxsize:
-        pages = islice(pages, args.count)
+        pages = list(islice(pages, args.count))
 
     with open('cache/processed.txt', 'a', encoding='utf-8') as processed:
-        for page in repo.allpages():
-            if not page.title.startswith('Q') and page.title not in already_made:
-                continue
-            item = page.title
-            data = get_data_for_item(item)
-            if data == 'Unsuitable':
-                print(f'Skipping {item} because it has no claim')
-            elif data is not None:
-                claims, label, description = data
-                article = args.begin = '\n'
-                article = article + generate(args.model, label, str(claims), description, args.temperature)
-                try:
-                    wiki.page(args.prefix + label).edit(article, summary(item), createonly=True)
-                except excs.articleexists:
-                    print('Skipping' + label + 'because it has been created in the meantime. Please check if it is yet to be connected to the Wikibase wiki.' )
-            processed.write(item + '\n') # Save the file on each iteration to allow abruptly exiting the process
-#@TODO: Allow batching items together to cut down on token usage
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for page in pages:
+                if not page.title.startswith('Q') and page.title not in already_made:
+                    continue
+                item = page.title
+                futures.append(executor.submit(process_item, item, args, processed))
+            for f in as_completed(futures):
+                result = f.result()
+
 if __name__ == '__main__':
     main()
-
-
