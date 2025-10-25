@@ -18,5 +18,7 @@ if you have an OpenRouter API key (you do not need to set up billing to use this
 * Allows specifying what, if anything, all articles should begin with
 * Allows specifying which namespace the items are found in the repository
 * Can be made to follow the wiki's editorial conventions thanks to custom prompts without source code changes
+* Fetches data and creates articles concurrently to make the whole process fast
 
 Run ``python wbgen.py --help`` to get a help message that explains how to use all the features.
+
